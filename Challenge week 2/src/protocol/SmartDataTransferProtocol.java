@@ -1,6 +1,10 @@
 package protocol;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+
 import client.*;
 
 public class SmartDataTransferProtocol extends IRDTProtocol {
@@ -8,6 +12,7 @@ public class SmartDataTransferProtocol extends IRDTProtocol {
     // change the following as you wish:
     static final int HEADERSIZE=1;   // number of header bytes in each packet
     static final int DATASIZE=128;   // max. number of user data bytes in each packet
+    Map<Integer, Integer[]> dataReceived = new HashMap<Integer, Integer[]>();
 
     @Override
     public void sender() {
@@ -29,7 +34,7 @@ public class SmartDataTransferProtocol extends IRDTProtocol {
 
         // send the packet to the network layer
         getNetworkLayer().sendPacket(pkt);
-        System.out.println("Sent one packet with header="+pkt[0]);
+        System.out.println("Sent one packet with header = "+pkt[0]);
 
         // schedule a timer for 1000 ms into the future, just to show how that works:
         client.Utils.Timeout.SetTimeout(1000, this, 28);
@@ -50,7 +55,7 @@ public class SmartDataTransferProtocol extends IRDTProtocol {
     public void TimeoutElapsed(Object tag) {
         int z=(Integer)tag;
         // handle expiration of the timeout:
-        System.out.println("Timer expired with tag="+z);
+        System.out.println("Timer expired with tag = "+z);
     }
 
     @Override
@@ -60,29 +65,37 @@ public class SmartDataTransferProtocol extends IRDTProtocol {
         // create the array that will contain the file contents
         // note: we don't know yet how large the file will be, so the easiest (but not most efficient)
         //   is to reallocate the array every time we find out there's more data
-        Integer[] fileContents = new Integer[0];
-
+        int amountPackets = 5;
+        ArrayList<String> list = new ArrayList<String>();
+        
         // loop until we are done receiving the file
         boolean stop = false;
         while (!stop) {
 
             // try to receive a packet from the network layer
             Integer[] packet = getNetworkLayer().receivePacket();
-
+            
             // if we indeed received a packet
-            if (packet != null) {
-
+            if (packet != null && !list.contains(packet[0])) {
+                if(!list.contains(packet[0])) {
+                  list.add(packet[0] + "");
+                }
                 // tell the user
                 System.out.println("Received packet, length="+packet.length+"  first byte="+packet[0] );
 
                 // append the packet's data part (excluding the header) to the fileContents array, first making it larger
-                int oldlength=fileContents.length;
-                int datalen= packet.length - HEADERSIZE;
-                fileContents = Arrays.copyOf(fileContents, oldlength+datalen);
-                System.arraycopy(packet, HEADERSIZE, fileContents, oldlength, datalen);
+                dataReceived.put(packet[0], packet);
+                Integer[] ack = new Integer[1];
+                ack[0] = packet[0];
+                getNetworkLayer().sendPacket(ack);
 
                 // and let's just hope the file is now complete
-                stop=true;
+                
+                
+                if (list.size() >= amountPackets){
+                  stop=true; 
+                }
+
 
             }else{
                 // wait ~10ms (or however long the OS makes us wait) before trying again
@@ -93,8 +106,17 @@ public class SmartDataTransferProtocol extends IRDTProtocol {
                 }
             }
         }
-
+        
         // write to the output file
-        Utils.setFileContents(fileContents, getFileID());
+        Integer[] fileWrite = new Integer[2085];
+        int inPosition = 0;
+        for(int i: dataReceived.keySet()){
+          if(dataReceived.containsKey(i)){
+            System.arraycopy(dataReceived.get(i), HEADERSIZE, fileWrite, inPosition, dataReceived.get(i).length - HEADERSIZE);
+            inPosition = inPosition + dataReceived.get(i).length - HEADERSIZE;
+          }
+        }
+        Utils.setFileContents(fileWrite, getFileID());
     }
+    
 }
